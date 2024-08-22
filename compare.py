@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Compare spelling checkers."""
+"""Compare spelling checker functionality and performance."""
 
+import heapq
+from platform import python_version
+import sys
 import time
 
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from pynuspell import load_from_path
 from hunspell import Hunspell
@@ -12,11 +16,20 @@ from hunspell import Hunspell
 BASE_W: str = '/usr/share/dict/'
 BASE_H: str = '/usr/share/hunspell/'
 LISTS: dict = {
+    'de_DE_frami': 'ngerman',
     'en_US': 'american-english',
     'es_ES': 'spanish',
-    'de_DE': 'ngerman',
+    'fr': 'french',
     'nl': 'dutch',
 }
+plt.rcParams['font.family'] = 'monospace'
+plt.rcParams['font.monospace'] = 'Noto Mono'
+plt.rcParams['legend.loc'] = 'upper right'
+FIGSIZE = (19.20, 10.80)
+plt.figure(figsize=FIGSIZE)
+MAX_SUGGEST = 1000
+MAX_SUGGEST_NL = 1000
+TOPX = 12
 
 # pylint:disable=unspecified-encoding
 
@@ -30,43 +43,69 @@ def get_hunspell(code: str):
     """Get Hunspell."""
     if code == 'en_US':
         return Hunspell(code)
-    return Hunspell(code, hunspell_data_dir=BASE_H)  # TODO Create issue
+    return Hunspell(code, hunspell_data_dir=BASE_H)  # TODO Create issue.
 
 
 def histo(code: str, file: str, name_n: str, name_h: str, function: str,
           data: dict):
     """Plot histogram to PNG file."""
     df = pd.DataFrame({name_h: data['tim_h'], name_n: data['tim_n']})
-    plt.figure(figsize=(19.20, 10.80))
-    df.plot.hist(alpha=0.5, bins=32, edgecolor='black',
-                 color=['blue', 'orange'], figsize=(19.20, 10.80))
-    plt.title(f'Histograms {function} with {code} on {file} for'
-              f' {data["len_h"]} words')
-    if function == 'suggest':
-        plt.xlabel('Process Time [µs]')
+    ax = df.plot.hist(alpha=0.5, bins=32, edgecolor='black',
+                      color=['blue', 'orange'], figsize=FIGSIZE)
+    plt.title(f"Histogram {function} with dictionary '{code}' on file '{file}'"
+              f' for {data["len_h"]} words in Python {python_version()}')
+    if function == 'suggest()':
+        scale = ' µs'
+        plt.xlabel(f'processing time [{scale[1:]}]')
+    elif function == 'len(suggest())':
+        scale = ''
+        plt.xlabel('number of words [n]')
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     else:
-        plt.xlabel('Process Time [ns]')
-    plt.ylabel('Frequency [log]')
+        scale = ' ns'
+        plt.xlabel(f'Process Time [{scale[1:]}]')
+    plt.ylabel('frequency [log(n)]')
     plt.yscale('log')
     plt.grid(True)
-    leg_h = f'{name_h} total={int(data["tot_h"]):,d}' \
-            f' min={int(data["min_h"]):,d}' \
-            f' max={int(data["max_h"]):,d} for {data["slo_h"]}'
-    leg_n = f'{name_n} total={int(data["tot_n"]):,d}' \
-            f' min={int(data["min_n"]):,d}' \
-            f' max={int(data["max_n"]):,d} for {data["slo_n"]}'
-    plt.legend([leg_h, leg_n])
-    plt.savefig(f'{function}-{code}-{file.replace(".tsv", "")}.png')
+    if function == 'len(suggest())':
+        leg_h = f'{name_h} slowest words\n'
+        leg_n = f'{name_n} slowest words\n'
+    else:
+        leg_h = f'{name_h} total time {int(data["tot_h"]):,d}{scale},' \
+                f' fastest word {int(data["min_h"]):,d}{scale},' \
+                ' slowest words\n'
+        leg_n = f'{name_n} total time {int(data["tot_n"]):,d}{scale},' \
+                f' fastest word {int(data["min_n"]):,d}{scale},' \
+                ' slowest words\n'
+    for tim, word in sorted(data['hea_h'], reverse=True):
+        leg_h += f'{int(tim):>11,d}{scale} {word}\n'
+    leg_h = leg_h[:-1]
+    more = False
+    for tim, word in sorted(data['hea_n'], reverse=True):
+        if function == 'len(suggest())' and tim > 15:
+            leg_n += f'{int(tim):>11,d}{scale}*{word}\n'
+            more = True
+        else:
+            leg_n += f'{int(tim):>11,d}{scale} {word}\n'
+    if more:
+        leg_n += '* more than 15 suggestions in the result'
+    elif function == 'suggest()':
+        leg_n += '() the number of suggestions in the result'
+    else:
+        leg_n = leg_n[:-1]
+    plt.legend([leg_h, leg_n], alignment='left')
+    plt.savefig(f'{function.replace("(", "").replace(")", "")}-{code}'
+                f'-{file.replace(".tsv", "")}')
+    plt.close()
 
 
 def check(path, checker):
     """Check all words with spelling checker and get suggestions for fails."""
     res = {}
-    tim_spe = []
+    values_spelling = []
+    slowest_spelling = []
     with open(path) as file:
         incorrect = set()
-        max_spe = 0
-        slo_spe = ''
         cnt = 0
         for line in file:
             line = line.strip().split('\t')[0]
@@ -74,53 +113,63 @@ def check(path, checker):
                 start = time.process_time_ns()
                 tmp = checker.spell(line)
                 tim = time.process_time_ns() - start
-                if tim > max_spe:
-                    max_spe = tim
-                    slo_spe = line
-                tim_spe.append(tim)
+                values_spelling.append(tim)
+                heapq.heappush(slowest_spelling, (tim, line))
+                if len(slowest_spelling) > TOPX:
+                    heapq.heappop(slowest_spelling)
                 if not tmp:
                     incorrect.add(line)
             cnt += 1
             if cnt % 50000 == 0:
-                print(f'    spe {cnt:07d}')
+                print(f'    spell {cnt:07d}')
         if cnt % 50000:
-            print(f'    spe {cnt:07d}')
-    res['len_spe'] = len(tim_spe)
-    res['min_spe'] = min(tim_spe)
-    res['max_spe'] = max_spe
-    res['tot_spe'] = sum(tim_spe)
-    res['tim_spe'] = tim_spe
-    res['slo_spe'] = slo_spe
+            print(f'    spell {cnt:07d}')
+    res['len_spe'] = len(values_spelling)
+    res['min_spe'] = min(values_spelling)
+    res['tot_spe'] = sum(values_spelling)
+    res['values_spelling'] = values_spelling
+    res['hea_spe'] = slowest_spelling
 
-    tim_sug = []
-    max_sug = 0.0
-    slo_sug = ''
+    values_suggest = []
+    values_lensuggest = []
+    slowest_suggest = []
+    slowest_lensuggest = []
     cnt = 0
     for line in incorrect:
         start = time.process_time_ns()
-        checker.suggest(line)
+        tmp = checker.suggest(line)
+        lentmp = len(tmp)
         tim = float(time.process_time_ns() - start) / 1000  # microseconds
-        if tim > max_sug:
-            max_sug = tim
-            slo_sug = line
-        tim_sug.append(tim)
+        values_suggest.append(tim)
+        heapq.heappush(slowest_suggest, (tim, f'{line} ({lentmp})'))
+        if len(slowest_suggest) > TOPX:
+            heapq.heappop(slowest_suggest)
+        values_lensuggest.append(lentmp)
+        heapq.heappush(slowest_lensuggest, (lentmp, line))
+        if len(slowest_lensuggest) > TOPX:
+            heapq.heappop(slowest_lensuggest)
         cnt += 1
         if cnt % 50 == 0:
-            print(f'    sug {cnt:07d}')
+            print(f'    suggest {cnt:07d}')
         if path.endswith('dutch') or path.endswith('.tsv'):
-            if cnt == 150:
+            if cnt == MAX_SUGGEST_NL:
                 break
         else:
-            if cnt == 500:
+            if cnt == MAX_SUGGEST:
                 break
     if cnt % 50:
-        print(f'    sug {cnt:07d}')
-    res['len_sug'] = len(tim_sug)
-    res['min_sug'] = min(tim_sug)
-    res['max_sug'] = max(tim_sug)
-    res['tot_sug'] = sum(tim_sug)
-    res['tim_sug'] = tim_sug
-    res['slo_sug'] = slo_sug
+        print(f'    suggest {cnt:07d}')
+    res['len_sug'] = len(values_suggest)
+    res['min_sug'] = min(values_suggest)
+    res['tot_sug'] = sum(values_suggest)
+    res['tim_sug'] = values_suggest
+    res['hea_sug'] = slowest_suggest
+
+    res['len_cnt'] = len(values_lensuggest)
+    res['min_cnt'] = 0
+    res['tot_cnt'] = 0
+    res['tim_cnt'] = values_lensuggest
+    res['hea_cnt'] = slowest_lensuggest
 
     return res
 
@@ -141,35 +190,50 @@ def compare(code: str, file: str) -> None:
     spe = {}
     spe['len_h'] = res_h['len_spe']
     spe['min_h'] = res_h['min_spe']
-    spe['max_h'] = res_h['max_spe']
     spe['tot_h'] = res_h['tot_spe']
-    spe['tim_h'] = res_h['tim_spe']
-    spe['slo_h'] = res_h['slo_spe']
+    spe['tim_h'] = res_h['values_spelling']
+    spe['hea_h'] = res_h['hea_spe']
+
     spe['len_n'] = res_n['len_spe']
     spe['min_n'] = res_n['min_spe']
-    spe['max_n'] = res_n['max_spe']
     spe['tot_n'] = res_n['tot_spe']
-    spe['tim_n'] = res_n['tim_spe']
-    spe['slo_n'] = res_n['slo_spe']
-    histo(code, file, name_n, name_h, 'spell', spe)
+    spe['tim_n'] = res_n['values_spelling']
+    spe['hea_n'] = res_n['hea_spe']
+    histo(code, file, name_n, name_h, 'spell()', spe)
 
     sug = {}
     sug['len_h'] = res_h['len_sug']
     sug['min_h'] = res_h['min_sug']
-    sug['max_h'] = res_h['max_sug']
     sug['tot_h'] = res_h['tot_sug']
     sug['tim_h'] = res_h['tim_sug']
-    sug['slo_h'] = res_h['slo_sug']
+    sug['hea_h'] = res_h['hea_sug']
+
     sug['len_n'] = res_n['len_sug']
     sug['min_n'] = res_n['min_sug']
-    sug['max_n'] = res_n['max_sug']
     sug['tot_n'] = res_n['tot_sug']
     sug['tim_n'] = res_n['tim_sug']
-    sug['slo_n'] = res_n['slo_sug']
-    histo(code, file, name_n, name_h, 'suggest', sug)
+    sug['hea_n'] = res_n['hea_sug']
+    histo(code, file, name_n, name_h, 'suggest()', sug)
+
+    cnt = {}
+    cnt['len_h'] = res_h['len_cnt']
+    cnt['min_h'] = res_h['min_cnt']
+    cnt['tot_h'] = res_h['tot_cnt']
+    cnt['tim_h'] = res_h['tim_cnt']
+    cnt['hea_h'] = res_h['hea_cnt']
+
+    cnt['len_n'] = res_n['len_cnt']
+    cnt['min_n'] = res_n['min_cnt']
+    cnt['tot_n'] = res_n['tot_cnt']
+    cnt['tim_n'] = res_n['tim_cnt']
+    cnt['hea_n'] = res_n['hea_cnt']
+    histo(code, file, name_n, name_h, 'len(suggest())', cnt)
 
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        MAX_SUGGEST = 100
+        MAX_SUGGEST_NL = 25
     for code, file in sorted(LISTS.items()):
         print(f'{code} {file}')
         compare(code, file)
