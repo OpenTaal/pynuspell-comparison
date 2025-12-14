@@ -47,7 +47,7 @@ def get_hunspell(code: str):
 
 
 def histo(code: str, file: str, name_n: str, name_h: str, function: str,
-          data: dict):
+          data: dict) -> None:
     """Plot histogram to PNG file."""
     df = pd.DataFrame({name_h: data['tim_h'], name_n: data['tim_n']})
     ax = df.plot.hist(alpha=0.5, bins=32, edgecolor='black',
@@ -99,7 +99,7 @@ def histo(code: str, file: str, name_n: str, name_h: str, function: str,
     plt.close()
 
 
-def check(path, checker):
+def check(path: str, checker) -> dict:
     """Check all words with spelling checker and get suggestions for fails."""
     res = {}
     values_spelling = []

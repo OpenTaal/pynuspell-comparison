@@ -1,0 +1,4 @@
+cyhunspell-py310
+matplotlib
+pandas
+#pynuspell

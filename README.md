@@ -4,10 +4,16 @@ Comparing Python moduel for Nuspell with those for Hunspell
 
 ## Installation
 
+Install
+
      sudo apt-get install libnuspell5 libhunspell-1.7 hunspell-en-us \
      hunspell-es hunspell-de-de-frami hunspell-fr-comprehensive hunspell-nl \
      wamerican wspanish wngerman wfrench wdutch
-     pip install -U pandas matplotlib pynuspell cyhunspell-py310
+     pip install -Ur requirements.txt
+
+For development, install
+
+     pip install -Ur requirements_dev.txt
 
 ## Running
 

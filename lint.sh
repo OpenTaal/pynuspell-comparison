@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 FILES='compare.py'
-echo '*PYDOCSTYLE'
+echo '* PYDOCSTYLE'
 pydocstyle --convention=numpy $FILES
 echo '* FLAKE8'
 # --ignore E252
@@ -12,6 +12,8 @@ echo '* PYLINT'
 pylint --notes FIXME --extension-pkg-allow-list hunspell,ucto --import-graph pylint-imports.gv $FILES
 echo '* PYFLAKES'
 pyflakes $FILES
+echo '* PYRIGHT-ALRIGHT'
+pyright-alright $FILES
 echo '* MYPY'
 # --implicit-optional
 mypy --ignore-missing-imports --implicit-optional $FILES
