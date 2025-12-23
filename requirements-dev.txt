@@ -5,4 +5,6 @@ numpydoc
 pydocstyle
 pyflakes
 pylint
-pyright_alright
+pyright-alright
+
+pandas-stubs

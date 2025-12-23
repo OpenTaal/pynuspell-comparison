@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Compare spelling checker functionality and performance."""
 
 import heapq

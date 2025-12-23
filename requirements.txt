@@ -1,4 +1,4 @@
-cyhunspell-py310
+#cyhunspell-py310
 matplotlib
 pandas
 #pynuspell
